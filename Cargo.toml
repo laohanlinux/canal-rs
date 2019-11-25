@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-
+protobuf = { version = "2", features = ["with-bytes"] }
 
 [dependencies.async-std]
 version = "1.0.1"
