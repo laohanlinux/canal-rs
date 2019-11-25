@@ -1,5 +1,6 @@
 pub mod proto;
 pub mod client;
+pub mod codec;
 pub mod protobuf;
 
 #[cfg(test)]

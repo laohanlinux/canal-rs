@@ -10,6 +10,8 @@ edition = "2018"
 protobuf = { version = "2", features = ["with-bytes"] }
 async-log = {version= "2.0.0"}
 log = "0.4"
+tokio = "0.1.22"
+bytes = "0.4.12"
 [dependencies.async-std]
 version = "1.0.1"
 features = ["unstable"]
