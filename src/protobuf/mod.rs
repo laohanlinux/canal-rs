@@ -1,2 +1,2 @@
-pub mod foo;
+pub mod EntryProtocol;
 pub mod CanalProtocol;
