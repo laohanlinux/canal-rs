@@ -1,5 +1,6 @@
 pub mod proto;
 pub mod client;
+pub mod protobuf;
 
 #[cfg(test)]
 mod tests {
