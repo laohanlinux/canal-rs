@@ -1,11 +1,14 @@
 use std::net::SocketAddr;
 use log::{info, trace, warn};
-use tokio::net::TcpStream;
 use std::error::Error;
-use tokio::io::{AsyncRead, AsyncWrite};
-use tokio::prelude::{Future, Stream};
-use tokio::codec::{self, FramedWrite};
 use std::time::Duration;
+
+use tokio::prelude::*;
+use tokio::net::TcpStream;
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio_util::codec;
+
+use futures::{future, Sink, SinkExt, Stream, StreamExt};
 
 pub struct Client {
     addr: SocketAddr,
@@ -19,10 +22,10 @@ impl Client {
     }
 
     pub async fn connect(&mut self) -> Result<(), Box<dyn Error>> {
-        let mut stream = TcpStream::connect(&self.addr).wait()?;
+        let mut stream = TcpStream::connect(&self.addr).await?;
         let (r, w) = stream.split();
         let mut canal_read_half = codec::length_delimited::Builder::new().big_endian().length_field_length(4).new_read(r);
-        let cancal = canal_read_half.take(1).await?;
+//        let cancal = canal_read_half.take(1).await?;
 
         Ok(())
     }
