@@ -1,6 +1,9 @@
+#[macro_use] extern crate log;
+
 pub mod proto;
 pub mod client;
 pub mod protobuf;
+
 
 #[cfg(test)]
 mod tests {
