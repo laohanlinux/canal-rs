@@ -11,6 +11,8 @@ use bytes::{Bytes, BytesMut};
 
 use futures::{future, Sink, SinkExt, Stream, StreamExt};
 
+use failure::Error as FailureError;
+
 use crate::protobuf::CanalProtocol::{
     Packet,
     PacketType,
@@ -65,10 +67,13 @@ impl Client {
         debug!("Connected canal server: {:?}", self.addr);
         let mut builder = codec::length_delimited::Builder::new().big_endian().length_field_length(4).new_codec();
         let mut framed = Framed::new(stream, builder);
-        let buf = framed.next().await.unwrap().unwrap();
+        let buf = framed.next().await.unwrap()?;
+        debug!("read a message, size: {}", buf.len());
         let packet: Packet = protobuf::parse_from_bytes(&buf).unwrap();
-        if let Err(e) = self.handle_handshake(&packet) {}
-        debug!("Handshaked canal server");
+        if let Err(e) = self.handle_handshake(&packet) {
+
+        }
+        debug!("Handshake canal server");
         self.framed = Some(framed);
         if let Err(e) = self.handle_auth().await {
 
@@ -96,11 +101,11 @@ impl Client {
         auth.password = self.db_conf.password.clone().into_bytes();
         auth.net_read_timeout_present = Some(self.db_conf.net_read_timeout_present.clone());
         auth.net_write_timeout_present = Some(self.db_conf.net_write_timeout_present.clone());
-        let auth_buf = auth.write_to_bytes().unwrap();
+        let auth_buf = auth.write_to_bytes()?;
         let mut packet = Packet::new();
         packet.set_field_type(PacketType::CLIENTAUTHENTICATION);
         packet.set_body(auth_buf);
-        let packet_buf = packet.write_to_bytes().unwrap();
+        let packet_buf = packet.write_to_bytes()?;
         let mut bytes = Bytes::from(packet_buf);
         let framed = self.framed.as_mut().unwrap();
         let ack = framed.next().await.unwrap().unwrap();
