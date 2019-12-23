@@ -69,7 +69,10 @@ impl Client {
         let mut builder = codec::length_delimited::Builder::new().big_endian().length_field_length(4).new_codec();
         let mut framed = Framed::new(stream, builder);
         let buf = framed.next().await.unwrap()?;
-        debug!("read a message, size: {}, {:?}", buf.len(), buf);
+        buf.iter().for_each(|c| {
+            debug!("-> {:?}", c);
+        });
+        
         let packet: Packet = protobuf::parse_from_bytes(&buf).unwrap();
         if let Err(e) = self.handle_handshake(&packet) {
             error!("{:?}", e);
@@ -83,9 +86,9 @@ impl Client {
     }
 
     pub fn handle_handshake(&self, handshake: &Packet) -> Result<(), FailureError> {
-        // if handshake.get_version() != version {
-        //     bail!("version is not matched: {:?}", handshake.get_version());
-        // }
+        if handshake.get_version() != version {
+            bail!("version is not matched:{:?} {:?}", handshake.version_present, handshake.get_version());
+        }
         if handshake.get_field_type() != PacketType::HANDSHAKE {
             bail!("expect handshake but found other type");
         }
