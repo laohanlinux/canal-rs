@@ -19,6 +19,7 @@ use crate::protobuf::CanalProtocol::{
     Handshake,
     ClientAuth,
     Ack,
+    Sub,
     ClientAuth_oneof_net_read_timeout_present,
     ClientAuth_oneof_net_write_timeout_present};
 use protobuf::{Message, parse_from_bytes};
@@ -68,30 +69,37 @@ impl Client {
         let mut builder = codec::length_delimited::Builder::new().big_endian().length_field_length(4).new_codec();
         let mut framed = Framed::new(stream, builder);
         let buf = framed.next().await.unwrap()?;
-        debug!("read a message, size: {}", buf.len());
+        debug!("read a message, size: {}, {:?}", buf.len(), buf);
         let packet: Packet = protobuf::parse_from_bytes(&buf).unwrap();
         if let Err(e) = self.handle_handshake(&packet) {
-
+            error!("{:?}", e);
         }
         debug!("Handshake canal server");
         self.framed = Some(framed);
         if let Err(e) = self.handle_auth().await {
-
+            error!("{:?}", e);
         }
         Ok(())
     }
 
-    pub fn handle_handshake(&self, handshake: &Packet) -> Result<(), String> {
-        if handshake.get_version() != version {
-            return Err("".to_string());
-        }
+    pub fn handle_handshake(&self, handshake: &Packet) -> Result<(), FailureError> {
+        // if handshake.get_version() != version {
+        //     bail!("version is not matched: {:?}", handshake.get_version());
+        // }
         if handshake.get_field_type() != PacketType::HANDSHAKE {
-            return Err("expect handshake but found other type".to_string());
+            bail!("expect handshake but found other type");
         }
         // TODO
         // add trace log display handshake detail
-        let handshake: Handshake = protobuf::parse_from_bytes(handshake.get_body()).or(Err("expect handshake but found other type".to_string()))?;
-        Ok(())
+        debug!("body: {:?}", handshake.get_body());
+        match protobuf::parse_from_bytes::<Handshake>(handshake.get_body()) {
+            Ok(handshake)  => {
+                debug!("seed: {:?}", handshake.get_seeds());
+               
+                Ok(())
+            },
+            Err(e) => bail!(e)
+        }
     }
 
     // TODO may be need to add header size
@@ -106,7 +114,7 @@ impl Client {
         packet.set_field_type(PacketType::CLIENTAUTHENTICATION);
         packet.set_body(auth_buf);
         let packet_buf = packet.write_to_bytes()?;
-        let mut bytes = Bytes::from(packet_buf);
+        let bytes = Bytes::from(packet_buf);
         let framed = self.framed.as_mut().unwrap();
         let ack = framed.next().await.unwrap().unwrap();
         let packet: Packet= protobuf::parse_from_bytes(&ack).unwrap();
@@ -122,7 +130,13 @@ impl Client {
 
     pub fn get(batch_size: usize, timeout: Option<i64>, uints: Option<i64>) {}
 
-    pub fn subscribe(filter: &String) -> Result<(), String> {
+    pub fn subscribe(&mut self, filter: &String) -> Result<(), FailureError> {
+        let framed = self.framed.as_mut().unwrap();
+        if !self.connected {
+            bail!("not connected");
+        }
+        let mut sub = Sub::new();
+        
         Ok(())
     }
 

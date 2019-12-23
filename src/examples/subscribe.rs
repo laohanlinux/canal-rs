@@ -1,3 +1,5 @@
+#[macro_use] extern crate log;
+
 use canal_rs::Client;
 use canal_rs::DbConfig;
 use canal_rs::protobuf::CanalProtocol::ClientAuth_oneof_net_read_timeout_present;
@@ -17,7 +19,7 @@ async fn main () -> Result<(), String>{
 
     let join = task::spawn(async move {
         let ret = client.connect().await;
-        println!("{:?}", ret);
+        debug!("{:?}", ret);
     });
 
     let ret = join.await;
