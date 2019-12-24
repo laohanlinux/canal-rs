@@ -18,19 +18,25 @@ use crate::protobuf::CanalProtocol::{
     PacketType,
     Handshake,
     ClientAuth,
+    Get,
     Ack,
     Sub,
+    ClientAck,
+    Messages,
     ClientAuth_oneof_net_read_timeout_present,
     ClientAuth_oneof_net_write_timeout_present};
 use protobuf::{Message, parse_from_bytes};
 
 const version: i32 = 1;
 
+
 pub struct Client {
     addr: SocketAddr,
     db_conf: DbConfig,
     framed: Option<Framed<TcpStream, LengthDelimitedCodec>>,
     connected: bool,
+    client_id: String,
+    destination: String,
 }
 
 pub struct DbConfig{
@@ -60,6 +66,8 @@ impl Client {
             db_conf:conf,
             framed: None,
             connected: false,
+            client_id: "127".to_string(),
+            destination: "example".to_string(),
         }
     }
 
@@ -112,6 +120,7 @@ impl Client {
         let packet_buf = packet.write_to_bytes()?;
         let bytes = Bytes::from(packet_buf);
         let framed = self.framed.as_mut().unwrap();
+        framed.send(bytes).await.unwrap();
         let ack = framed.next().await.unwrap().unwrap();
         let packet: Packet= protobuf::parse_from_bytes(&ack).unwrap();
         assert_eq!(packet.get_field_type(), PacketType::ACK);
@@ -122,17 +131,71 @@ impl Client {
         Ok(())
     }
 
-    pub fn get_with_out_ack(batch_size: usize, timeout: Option<i64>, uints: Option<i32>) {}
+    pub async fn get_with_out_ack(&mut self,  batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError>{
+        assert!(self.connected);
+        let mut get_proto = Get::new();
+        get_proto.set_client_id(self.client_id.clone());
+        get_proto.set_destination(self.destination.clone());
+        get_proto.set_fetch_size(batch_size);
+        let _timeout = timeout.or_else(|| Some(-1));
+        get_proto.set_timeout(_timeout.unwrap());
+        get_proto.set_unit(uints.or_else(|| Some(-1)).unwrap());
+        get_proto.set_auto_ack(false);
 
-    pub fn get(batch_size: usize, timeout: Option<i64>, uints: Option<i64>) {}
 
-    pub fn subscribe(&mut self, filter: &String) -> Result<(), FailureError> {
+        let auth_buf = get_proto.write_to_bytes()?;
+        let mut packet = Packet::new();
+        packet.set_field_type(PacketType::GET);
+        packet.set_body(auth_buf);
+        let packet_buf = packet.write_to_bytes()?;
+        let bytes = Bytes::from(packet_buf);
+        let framed = self.framed.as_mut().unwrap();
+        framed.send(bytes).await.unwrap();
+
+
+        let buf = framed.next().await.unwrap().unwrap();
+        let packet: Packet= protobuf::parse_from_bytes(&buf).unwrap();
+        let message: Messages = protobuf::parse_from_bytes(packet.get_body()).unwrap();
+
+        Ok(message)
+    }
+
+    pub async fn get(&mut self, batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError> {
+        let ret =  self.get_with_out_ack(batch_size, timeout, uints).await;
+        if ret.is_err() {
+            return  ret;
+        }
+        if let Ok(ref message) = ret {
+            self.ack(message.batch_id).await.unwrap();
+        }
+        ret
+    }
+
+    pub async fn subscribe(&mut self, filter: &String) -> Result<(), FailureError> {
         let framed = self.framed.as_mut().unwrap();
         if !self.connected {
             bail!("not connected");
         }
         let mut sub = Sub::new();
-        
+        sub.set_client_id(self.client_id.clone());
+        sub.set_destination(self.destination.clone());
+        sub.set_filter(filter.clone());
+        let mut packet = Packet::new();
+        packet.set_field_type(PacketType::SUBSCRIPTION);
+        let sub_buf = sub.write_to_bytes().unwrap();
+        packet.set_body(sub_buf);
+
+        let packet_buf = packet.write_to_bytes().unwrap();
+        let bytes = Bytes::from(packet_buf);
+        framed.send(bytes).await.unwrap();
+
+        let ack = framed.next().await.unwrap().unwrap();
+        let packet: Packet= protobuf::parse_from_bytes(&ack).unwrap();
+        assert_eq!(packet.get_field_type(), PacketType::ACK);
+        let ack: Ack = protobuf::parse_from_bytes(packet.get_body()).unwrap();
+        debug!("{:?}", ack.get_error_message());
+        assert_eq!(ack.get_error_code(), 0);
+        debug!("Pass subscribe");
         Ok(())
     }
 
@@ -140,7 +203,21 @@ impl Client {
         Ok(())
     }
 
-    pub fn ack(batch_id: i64) -> Result<(), String> {
+    pub async fn ack(&mut self, batch_id: i64) -> Result<(), FailureError> {
+        let framed = self.framed.as_mut().unwrap();
+        if !self.connected {
+            bail!("not connected");
+        }
+        let mut ack = ClientAck::new();
+        ack.set_client_id(self.client_id.clone());
+        ack.set_destination(self.destination.clone());
+        ack.set_batch_id(batch_id);
+        let mut packet = Packet::new();
+        packet.set_field_type(PacketType::CLIENTACK);
+        let buf = ack.write_to_bytes().unwrap();
+        packet.set_body(buf);
+        let bytes = Bytes::from(packet.write_to_bytes().unwrap());
+        framed.send(bytes).await.unwrap();
         Ok(())
     }
 
@@ -151,4 +228,5 @@ impl Client {
     pub fn write_header() {}
 
     pub fn handshake() {}
+
 }
