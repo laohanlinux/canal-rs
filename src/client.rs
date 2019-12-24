@@ -69,10 +69,6 @@ impl Client {
         let mut builder = codec::length_delimited::Builder::new().big_endian().length_field_length(4).new_codec();
         let mut framed = Framed::new(stream, builder);
         let buf = framed.next().await.unwrap()?;
-        buf.iter().for_each(|c| {
-            debug!("-> {:?}", c);
-        });
-        
         let packet: Packet = protobuf::parse_from_bytes(&buf).unwrap();
         if let Err(e) = self.handle_handshake(&packet) {
             error!("{:?}", e);
@@ -94,11 +90,8 @@ impl Client {
         }
         // TODO
         // add trace log display handshake detail
-        debug!("body: {:?}", handshake.get_body());
         match protobuf::parse_from_bytes::<Handshake>(handshake.get_body()) {
             Ok(handshake)  => {
-                debug!("seed: {:?}", handshake.get_seeds());
-               
                 Ok(())
             },
             Err(e) => bail!(e)
