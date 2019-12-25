@@ -1,4 +1,4 @@
-syntax = "proto3";
+﻿syntax = "proto3";
 package com.alibaba.otter.canal.protocol;
 
 option java_package = "com.alibaba.otter.canal.protocol";
@@ -72,7 +72,7 @@ message ClientAuth {
     oneof net_read_timeout_present {
         int32 net_read_timeout = 3; // in seconds
     }
-    // [default = 0];
+    // [default = 0]; 
     oneof net_write_timeout_present {
         int32 net_write_timeout = 4; // in seconds
     }

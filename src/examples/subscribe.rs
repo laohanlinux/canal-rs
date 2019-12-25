@@ -8,6 +8,8 @@ use canal_rs::protobuf::CanalProtocol::ClientAuth_oneof_net_write_timeout_presen
 
 use tokio::prelude::*;
 use tokio::task;
+use tokio::time::{self, Delay, timeout, timeout_at, Instant};
+use std::time::{Duration};
 
 #[tokio::main]
 async fn main () -> Result<(), String>{
@@ -20,8 +22,12 @@ async fn main () -> Result<(), String>{
     let join = task::spawn(async move {
         client.connect().await.unwrap();
         client.subscribe(&".*".to_string()).await.unwrap();
-        while let Ok(message) = client.get(100, Some(10), None).await {
-
+        while let message = client.get(100, Some(10), Some(10)).await.unwrap() {
+            // if message.batch_id == -1 {
+            //     time::advance(Duration::from_secs(3)).await;
+            // }
+            println!("{:?}, {:?}", message.batch_id, message.messages);
+            break;
         }
     });
 

@@ -133,6 +133,8 @@ impl Client {
 
     pub async fn get_with_out_ack(&mut self,  batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError>{
         assert!(self.connected);
+
+
         let mut get_proto = Get::new();
         get_proto.set_client_id(self.client_id.clone());
         get_proto.set_destination(self.destination.clone());
@@ -143,11 +145,12 @@ impl Client {
         get_proto.set_auto_ack(false);
 
 
-        let auth_buf = get_proto.write_to_bytes()?;
+        let body_buffer = get_proto.write_to_bytes()?;
         let mut packet = Packet::new();
         packet.set_field_type(PacketType::GET);
-        packet.set_body(auth_buf);
+        packet.set_body(body_buffer);
         let packet_buf = packet.write_to_bytes()?;
+        println!("==>{:?}", packet_buf);
         let bytes = Bytes::from(packet_buf);
         let framed = self.framed.as_mut().unwrap();
         framed.send(bytes).await.unwrap();
