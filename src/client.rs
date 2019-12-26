@@ -144,22 +144,17 @@ impl Client {
         get_proto.set_unit(uints.or_else(|| Some(-1)).unwrap());
         get_proto.set_auto_ack(false);
 
-
         let body_buffer = get_proto.write_to_bytes()?;
         let mut packet = Packet::new();
         packet.set_field_type(PacketType::GET);
         packet.set_body(body_buffer);
         let packet_buf = packet.write_to_bytes()?;
-        println!("==>{:?}", packet_buf);
         let bytes = Bytes::from(packet_buf);
         let framed = self.framed.as_mut().unwrap();
         framed.send(bytes).await.unwrap();
-
-
         let buf = framed.next().await.unwrap().unwrap();
         let packet: Packet= protobuf::parse_from_bytes(&buf).unwrap();
         let message: Messages = protobuf::parse_from_bytes(packet.get_body()).unwrap();
-
         Ok(message)
     }
 
