@@ -34,7 +34,7 @@ async fn main() -> Result<(), String> {
                 let entry: Entry = parse_from_bytes(&buf).unwrap();
                 match parse_from_bytes::<RowChange>(entry.get_storeValue()) {
                     Ok(row_change) => {
-                        debug!("row_change: {?:}", row_change);
+                        debug!("row_change: {:?}", row_change);
                     },
                     _ => {}
                 }
