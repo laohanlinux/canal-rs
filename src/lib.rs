@@ -1,7 +1,6 @@
 #[macro_use] extern crate log;
 #[macro_use] extern crate failure;
 
-pub mod proto;
 pub mod client;
 pub mod protobuf;
 

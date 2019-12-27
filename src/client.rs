@@ -87,8 +87,6 @@ impl Client {
         if handshake.get_field_type() != PacketType::HANDSHAKE {
             bail!("expect handshake but found other type");
         }
-        // TODO
-        // add trace log display handshake detail
         match protobuf::parse_from_bytes::<Handshake>(handshake.get_body()) {
             Ok(handshake) => {
                 Ok(())
@@ -97,7 +95,6 @@ impl Client {
         }
     }
 
-    // TODO may be need to add header size
     async fn handle_auth(&mut self) -> Result<(), Box<dyn Error>> {
         let mut auth = ClientAuth::new();
         auth.username = self.db_conf.user_name.clone();
@@ -238,8 +235,4 @@ impl Client {
         packet.set_body(message.write_to_bytes().unwrap());
         self.write_packet(packet).await
     }
-
-    pub fn write_header() {}
-
-    pub fn handshake() {}
 }
