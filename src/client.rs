@@ -10,25 +10,24 @@ use tokio_util::codec::{self, LengthDelimitedCodec, Framed};
 use bytes::{Bytes, BytesMut};
 
 use futures::{future, Sink, SinkExt, Stream, StreamExt};
+use failure::{Error as FailureError, Fail};
 
-use failure::Error as FailureError;
-
-use crate::protobuf::CanalProtocol::{
-    Packet,
-    PacketType,
-    Handshake,
-    ClientAuth,
-    Get,
-    Ack,
-    Sub,
-    ClientAck,
-    Messages,
-    ClientAuth_oneof_net_read_timeout_present,
-    ClientAuth_oneof_net_write_timeout_present};
+use crate::protobuf::CanalProtocol::{Packet,
+                                     PacketType,
+                                     Handshake,
+                                     ClientAuth,
+                                     Get,
+                                     Ack,
+                                     Sub,
+                                     Unsub,
+                                     ClientAck,
+                                     Messages,
+                                     ClientRollback,
+                                     ClientAuth_oneof_net_read_timeout_present,
+                                     ClientAuth_oneof_net_write_timeout_present};
 use protobuf::{Message, parse_from_bytes};
 
 const version: i32 = 1;
-
 
 pub struct Client {
     addr: SocketAddr,
@@ -39,7 +38,7 @@ pub struct Client {
     destination: String,
 }
 
-pub struct DbConfig{
+pub struct DbConfig {
     user_name: String,
     password: String,
     net_read_timeout_present: ClientAuth_oneof_net_read_timeout_present,
@@ -49,7 +48,7 @@ pub struct DbConfig{
 impl DbConfig {
     pub fn new(user_name: String, password: String,
                net_read_timeout_present: ClientAuth_oneof_net_read_timeout_present,
-               net_write_timeout_present: ClientAuth_oneof_net_write_timeout_present) -> Self{
+               net_write_timeout_present: ClientAuth_oneof_net_write_timeout_present) -> Self {
         DbConfig {
             user_name,
             password,
@@ -63,7 +62,7 @@ impl Client {
     pub fn new(addr: SocketAddr, conf: DbConfig) -> Client {
         Client {
             addr,
-            db_conf:conf,
+            db_conf: conf,
             framed: None,
             connected: false,
             client_id: "127".to_string(),
@@ -72,21 +71,13 @@ impl Client {
     }
 
     pub async fn connect(&mut self) -> Result<(), Box<dyn Error>> {
-        let mut stream = TcpStream::connect(&self.addr).await?;
-        debug!("Connected canal server: {:?}", self.addr);
+        let stream = TcpStream::connect(&self.addr).await?;
         let mut builder = codec::length_delimited::Builder::new().big_endian().length_field_length(4).new_codec();
         let mut framed = Framed::new(stream, builder);
-        let buf = framed.next().await.unwrap()?;
-        let packet: Packet = protobuf::parse_from_bytes(&buf).unwrap();
-        if let Err(e) = self.handle_handshake(&packet) {
-            error!("{:?}", e);
-        }
-        debug!("Handshake canal server");
         self.framed = Some(framed);
-        if let Err(e) = self.handle_auth().await {
-            error!("{:?}", e);
-        }
-        Ok(())
+        let packet: Packet = self.read_packet().await?;
+        self.handle_handshake(&packet)?;
+        self.handle_auth().await
     }
 
     pub fn handle_handshake(&self, handshake: &Packet) -> Result<(), FailureError> {
@@ -99,9 +90,9 @@ impl Client {
         // TODO
         // add trace log display handshake detail
         match protobuf::parse_from_bytes::<Handshake>(handshake.get_body()) {
-            Ok(handshake)  => {
+            Ok(handshake) => {
                 Ok(())
-            },
+            }
             Err(e) => bail!(e)
         }
     }
@@ -113,28 +104,17 @@ impl Client {
         auth.password = self.db_conf.password.clone().into_bytes();
         auth.net_read_timeout_present = Some(self.db_conf.net_read_timeout_present.clone());
         auth.net_write_timeout_present = Some(self.db_conf.net_write_timeout_present.clone());
-        let auth_buf = auth.write_to_bytes()?;
-        let mut packet = Packet::new();
-        packet.set_field_type(PacketType::CLIENTAUTHENTICATION);
-        packet.set_body(auth_buf);
-        let packet_buf = packet.write_to_bytes()?;
-        let bytes = Bytes::from(packet_buf);
-        let framed = self.framed.as_mut().unwrap();
-        framed.send(bytes).await.unwrap();
-        let ack = framed.next().await.unwrap().unwrap();
-        let packet: Packet= protobuf::parse_from_bytes(&ack).unwrap();
+        self.write_message(PacketType::CLIENTAUTHENTICATION, auth).await?;
+        let packet = self.read_packet().await?;
         assert_eq!(packet.get_field_type(), PacketType::ACK);
         let ack: Ack = protobuf::parse_from_bytes(packet.get_body()).unwrap();
         assert_eq!(ack.get_error_code(), 0);
-        debug!("Pass auth");
         self.connected = true;
         Ok(())
     }
 
-    pub async fn get_with_out_ack(&mut self,  batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError>{
+    pub async fn get_without_ack(&mut self, batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError> {
         assert!(self.connected);
-
-
         let mut get_proto = Get::new();
         get_proto.set_client_id(self.client_id.clone());
         get_proto.set_destination(self.destination.clone());
@@ -143,25 +123,15 @@ impl Client {
         get_proto.set_timeout(_timeout.unwrap());
         get_proto.set_unit(uints.or_else(|| Some(-1)).unwrap());
         get_proto.set_auto_ack(false);
-
-        let body_buffer = get_proto.write_to_bytes()?;
-        let mut packet = Packet::new();
-        packet.set_field_type(PacketType::GET);
-        packet.set_body(body_buffer);
-        let packet_buf = packet.write_to_bytes()?;
-        let bytes = Bytes::from(packet_buf);
-        let framed = self.framed.as_mut().unwrap();
-        framed.send(bytes).await.unwrap();
-        let buf = framed.next().await.unwrap().unwrap();
-        let packet: Packet= protobuf::parse_from_bytes(&buf).unwrap();
-        let message: Messages = protobuf::parse_from_bytes(packet.get_body()).unwrap();
-        Ok(message)
+        self.write_message(PacketType::GET, get_proto).await?;
+        self.read_message().await
     }
 
     pub async fn get(&mut self, batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError> {
-        let ret =  self.get_with_out_ack(batch_size, timeout, uints).await;
+        assert!(self.connected);
+        let ret = self.get_without_ack(batch_size, timeout, uints).await;
         if ret.is_err() {
-            return  ret;
+            return ret;
         }
         if let Ok(ref message) = ret {
             self.ack(message.batch_id).await.unwrap();
@@ -169,62 +139,107 @@ impl Client {
         ret
     }
 
-    pub async fn subscribe(&mut self, filter: &String) -> Result<(), FailureError> {
-        let framed = self.framed.as_mut().unwrap();
-        if !self.connected {
-            bail!("not connected");
-        }
+    pub async fn subscribe(&mut self, filter: String) -> Result<(), FailureError> {
+        assert!(self.connected);
         let mut sub = Sub::new();
         sub.set_client_id(self.client_id.clone());
         sub.set_destination(self.destination.clone());
-        sub.set_filter(filter.clone());
-        let mut packet = Packet::new();
-        packet.set_field_type(PacketType::SUBSCRIPTION);
-        let sub_buf = sub.write_to_bytes().unwrap();
-        packet.set_body(sub_buf);
-
-        let packet_buf = packet.write_to_bytes().unwrap();
-        let bytes = Bytes::from(packet_buf);
-        framed.send(bytes).await.unwrap();
-
-        let ack = framed.next().await.unwrap().unwrap();
-        let packet: Packet= protobuf::parse_from_bytes(&ack).unwrap();
+        sub.set_filter(filter);
+        self.write_message(PacketType::SUBSCRIPTION, sub).await;
+        let packet = self.read_packet().await?;
         assert_eq!(packet.get_field_type(), PacketType::ACK);
         let ack: Ack = protobuf::parse_from_bytes(packet.get_body()).unwrap();
-        debug!("{:?}", ack.get_error_message());
-        assert_eq!(ack.get_error_code(), 0);
-        debug!("Pass subscribe");
+        if ack.get_error_code() != 0 {
+            bail!("code: {:?}", ack.get_error_code());
+        }
         Ok(())
     }
 
-    pub fn unsubscribe() -> Result<(), String> {
-        Ok(())
+    pub async fn unsubscribe(&mut self, filter: String) -> Result<(), FailureError> {
+        assert!(self.connected);
+        let mut unsub = Unsub::new();
+        unsub.set_client_id(self.client_id.clone());
+        unsub.set_destination(self.destination.clone());
+        unsub.set_filter(filter);
+        self.write_message(PacketType::UNSUBSCRIPTION, unsub).await;
+        let packet = self.read_packet().await?;
+        assert_eq!(packet.get_field_type(), PacketType::ACK);
+        match protobuf::parse_from_bytes::<Ack>(packet.get_body()) {
+            Ok(ack) => {
+                if ack.get_error_code() > 0 {
+                    bail!("code: {:?}", ack.get_error_code());
+                }
+                Ok(())
+            }
+            Err(e) => bail!("{:?}", e),
+        }
     }
 
     pub async fn ack(&mut self, batch_id: i64) -> Result<(), FailureError> {
-        let framed = self.framed.as_mut().unwrap();
-        if !self.connected {
-            bail!("not connected");
-        }
+        assert!(self.connected);
         let mut ack = ClientAck::new();
         ack.set_client_id(self.client_id.clone());
         ack.set_destination(self.destination.clone());
         ack.set_batch_id(batch_id);
-        let mut packet = Packet::new();
-        packet.set_field_type(PacketType::CLIENTACK);
-        let buf = ack.write_to_bytes().unwrap();
-        packet.set_body(buf);
-        let bytes = Bytes::from(packet.write_to_bytes().unwrap());
-        framed.send(bytes).await.unwrap();
+        self.write_message(PacketType::CLIENTACK, ack).await
+    }
+
+    pub async fn roll_back(&mut self, batch_id: i64) -> Result<(), FailureError> {
+        assert!(self.connected);
+        let mut roll_back = ClientRollback::new();
+        roll_back.set_client_id(self.client_id.clone());
+        roll_back.set_destination(self.destination.clone());
+        roll_back.set_batch_id(batch_id);
+        self.write_message(PacketType::CLIENTROLLBACK, roll_back).await
+    }
+
+    pub async fn disconnect(&mut self) -> Result<(), FailureError> {
+        assert!(self.connected);
+        self.connected = false;
+        self.framed.take();
+        debug!("Close connection");
         Ok(())
     }
 
-    pub fn roll_back(batch_id: i64) -> Result<(), String> {
-        Ok(())
+    async fn read_packet(&mut self) -> Result<Packet, FailureError> {
+        let framed = self.framed.as_mut().unwrap();
+        match framed.next().await {
+            Some(Ok(buf)) => {
+                let packet: Packet = protobuf::parse_from_bytes(&buf).unwrap();
+                Ok(packet)
+            }
+            Some(Err(e)) => bail!("{:?}", e),
+            None => bail!("Connect has close"),
+        }
+    }
+
+    async fn read_message<M: Message>(&mut self) -> Result<M, FailureError> {
+        match self.read_packet().await {
+            Ok(packet) => {
+                let message = protobuf::parse_from_bytes(packet.get_body()).unwrap();
+                Ok(message)
+            }
+            Err(e) => Err(e)
+        }
+    }
+
+    async fn write_packet(&mut self, packet: Packet) -> Result<(), FailureError> {
+        let framed = self.framed.as_mut().unwrap();
+        let bytes = Bytes::from(packet.write_to_bytes().unwrap());
+        match framed.send(bytes).await {
+            Ok(_) => Ok(()),
+            Err(e) => bail!("{:}", e)
+        }
+    }
+
+    async fn write_message<M: Message>(&mut self, packet_type: PacketType, message: M) -> Result<(), FailureError> {
+        let mut packet = Packet::new();
+        packet.set_field_type(packet_type);
+        packet.set_body(message.write_to_bytes().unwrap());
+        self.write_packet(packet).await
     }
 
     pub fn write_header() {}
 
     pub fn handshake() {}
-
 }
