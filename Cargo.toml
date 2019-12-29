@@ -14,3 +14,7 @@ bytes = { version = "0.5", features = ["serde"] }
 futures = "0.3.0"
 log = "0.4"
 failure = "0.1.6"
+zookeeper = "0.5"
+serde_json = "1.0"
+serde = "1.0.104"
+serde_derive = "1.0.104"

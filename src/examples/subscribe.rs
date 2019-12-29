@@ -19,7 +19,7 @@ async fn main() -> Result<(), String> {
 
     let conf = DbConfig::new("".to_string(), "".to_string(), ClientAuth_oneof_net_read_timeout_present::net_read_timeout(0), ClientAuth_oneof_net_write_timeout_present::net_write_timeout(0));
 
-    let mut client: Client = Client::new("127.0.0.1:11111".parse().unwrap(), conf);
+    let mut client: Client = Client::new("111.229.233.174:11111".parse().unwrap(), conf);
     client.connect().await.unwrap();
     client.subscribe(".*".to_string()).await.unwrap();
     let join = task::spawn(async move {
