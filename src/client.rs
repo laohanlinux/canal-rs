@@ -10,7 +10,7 @@ use tokio_util::codec::{self, LengthDelimitedCodec, Framed};
 use bytes::{Bytes, BytesMut};
 
 use futures::{future, Sink, SinkExt, Stream, StreamExt};
-use failure::{Error as FailureError, Fail};
+use failure::{Error as FailureError, Fail, err_msg};
 
 use crate::protobuf::CanalProtocol::{Packet,
                                      PacketType,
@@ -87,12 +87,7 @@ impl Client {
         if handshake.get_field_type() != PacketType::HANDSHAKE {
             bail!("expect handshake but found other type");
         }
-        match protobuf::parse_from_bytes::<Handshake>(handshake.get_body()) {
-            Ok(handshake) => {
-                Ok(())
-            }
-            Err(e) => bail!(e)
-        }
+        protobuf::parse_from_bytes::<Handshake>(handshake.get_body()).map(|_| ()).map_err(|err|err.into())
     }
 
     async fn handle_auth(&mut self) -> Result<(), Box<dyn Error>> {
@@ -126,14 +121,8 @@ impl Client {
 
     pub async fn get(&mut self, batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError> {
         assert!(self.connected);
-        let ret = self.get_without_ack(batch_size, timeout, uints).await;
-        if ret.is_err() {
-            return ret;
-        }
-        if let Ok(ref message) = ret {
-            self.ack(message.batch_id).await.unwrap();
-        }
-        ret
+        let message = self.get_without_ack(batch_size, timeout, uints).await?;
+        self.ack(message.batch_id).await.map(|_| message)
     }
 
     pub async fn subscribe(&mut self, filter: String) -> Result<(), FailureError> {
@@ -211,22 +200,12 @@ impl Client {
     }
 
     async fn read_message<M: Message>(&mut self) -> Result<M, FailureError> {
-        match self.read_packet().await {
-            Ok(packet) => {
-                let message = protobuf::parse_from_bytes(packet.get_body()).unwrap();
-                Ok(message)
-            }
-            Err(e) => Err(e)
-        }
+        self.read_packet().await.map(|packet| protobuf::parse_from_bytes(packet.get_body()).unwrap()).map_err(|err| err.into())
     }
 
     async fn write_packet(&mut self, packet: Packet) -> Result<(), FailureError> {
         let framed = self.framed.as_mut().unwrap();
-        let bytes = Bytes::from(packet.write_to_bytes().unwrap());
-        match framed.send(bytes).await {
-            Ok(_) => Ok(()),
-            Err(e) => bail!("{:}", e)
-        }
+        framed.send( Bytes::from(packet.write_to_bytes().unwrap())).await.map(|_| ()).map_err(|err| err.into())
     }
 
     async fn write_message<M: Message>(&mut self, packet_type: PacketType, message: M) -> Result<(), FailureError> {
