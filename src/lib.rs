@@ -6,7 +6,7 @@ pub mod client;
 pub mod cluster;
 pub mod protobuf;
 
-pub use client::{Client, DbConfig};
+pub use client::{Client, Config};
 
 #[cfg(test)]
 mod tests {

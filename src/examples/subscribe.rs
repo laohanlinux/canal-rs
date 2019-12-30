@@ -2,7 +2,7 @@
 extern crate log;
 
 use canal_rs::Client;
-use canal_rs::DbConfig;
+use canal_rs::Config;
 use canal_rs::protobuf::EntryProtocol::{Entry, RowChange};
 use canal_rs::protobuf::CanalProtocol::ClientAuth_oneof_net_read_timeout_present;
 use canal_rs::protobuf::CanalProtocol::ClientAuth_oneof_net_write_timeout_present;
@@ -17,7 +17,7 @@ use std::time::Duration;
 async fn main() -> Result<(), String> {
     pretty_env_logger::init();
 
-    let conf = DbConfig::new("".to_string(), "".to_string(), ClientAuth_oneof_net_read_timeout_present::net_read_timeout(0), ClientAuth_oneof_net_write_timeout_present::net_write_timeout(0));
+    let conf = Config::new("".to_string(), "".to_string(), "128".to_string(), "example".to_string(), ClientAuth_oneof_net_read_timeout_present::net_read_timeout(0), ClientAuth_oneof_net_write_timeout_present::net_write_timeout(0));
 
     let mut client: Client = Client::new("111.229.233.174:11111".parse().unwrap(), conf);
     client.connect().await.unwrap();
@@ -35,7 +35,7 @@ async fn main() -> Result<(), String> {
                 match parse_from_bytes::<RowChange>(entry.get_storeValue()) {
                     Ok(row_change) => {
                         debug!("row_change: {:?}", row_change);
-                    },
+                    }
                     _ => {}
                 }
             }

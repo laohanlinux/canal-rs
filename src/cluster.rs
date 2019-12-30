@@ -10,19 +10,101 @@ use serde_json::{Serializer, Deserializer};
 use std::time::Duration;
 use std::sync::{Arc, Mutex};
 use std::str::FromStr;
+use std::net::SocketAddr;
+use crate::{Config, Client};
+use crate::protobuf::CanalProtocol::Messages;
+
+
+pub struct Cluster {
+    config: Config,
+    node: ClusterNode,
+    client: Client,
+}
+
+impl Cluster {
+    pub async fn new(config: Config, destinations: String, zk_addr: String, zk_timeout: Duration) -> Result<Cluster, FailureError> {
+        let node = ClusterNode::new(zk_addr.as_str(), destinations.clone(), zk_timeout).await?;
+        let running_node: RunningNode = node.get_active_canal_config()?;
+        let socket: SocketAddr = running_node.address.parse().unwrap();
+        let running_node: RunningNode = node.get_active_canal_config()?;
+        let mut client = crate::Client::new(running_node.address.parse().unwrap(), config.clone());
+        client.connect().await?;
+        Ok(Cluster {
+            node: node,
+            client,
+            config: config,
+        })
+    }
+
+    pub async fn get_without_ack(&mut self, batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError> {
+        let ret = self.client.get_without_ack(batch_size, timeout, uints).await;
+        if ret.is_ok() {
+            return ret;
+        }
+        self.fix_connect().await?;
+        ret
+    }
+
+    pub async fn get(&mut self, batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError> {
+        let ret = self.client.get(batch_size, timeout, uints).await;
+        if ret.is_ok() {
+            return ret;
+        }
+        self.fix_connect().await?;
+        ret
+    }
+    pub async fn subscribe(&mut self, filter: String) -> Result<(), FailureError> {
+        let ret = self.client.subscribe(filter).await;
+        if ret.is_ok() {
+            return ret;
+        }
+        self.fix_connect().await?;
+        ret
+    }
+
+    pub async fn unsubscribe(&mut self, filter: String) -> Result<(), FailureError> {
+        let ret = self.client.unsubscribe(filter).await;
+        if ret.is_ok() {
+            return ret;
+        }
+        self.fix_connect().await?;
+        ret
+    }
+
+    pub async fn ack(&mut self, batch_id: i64) -> Result<(), FailureError> {
+        let ret = self.client.ack(batch_id).await;
+        if ret.is_ok() {
+            return ret;
+        }
+        self.fix_connect().await?;
+        ret
+    }
+
+    pub async fn disconnect(&mut self) -> Result<(), FailureError> {
+        self.client.disconnect().await
+    }
+
+    async fn fix_connect(&mut self) -> Result<(), FailureError> {
+        let running_node = self.node.get_active_canal_config()?;
+        let socket = running_node.address.parse().unwrap();
+        self.client = crate::Client::new(socket, self.config.clone());
+        self.client.connect().await?;
+        Ok(())
+    }
+}
 
 #[derive(Clone)]
-pub struct Cluster {
+pub struct ClusterNode {
     destinations: String,
     zk: Arc<Mutex<ZooKeeper>>,
 }
 
 #[derive(Serialize, Deserialize, Debug)]
-struct RunningNode {
+pub struct RunningNode {
     #[serde(alias = "active")]
-    Active: bool,
+    active: bool,
     #[serde(alias = "address")]
-    Address: String,
+    address: String,
 }
 
 struct ignoreLogWatch;
@@ -31,21 +113,21 @@ impl Watcher for ignoreLogWatch {
     fn handle(&self, e: WatchedEvent) {}
 }
 
-impl Watcher for Cluster {
+impl Watcher for ClusterNode {
     fn handle(&self, e: WatchedEvent) {}
 }
 
-impl Cluster {
-    pub async fn new(addr: &str, destinations: String, timeout: Duration) -> Result<Cluster, FailureError> {
+impl ClusterNode {
+    pub async fn new(addr: &str, destinations: String, timeout: Duration) -> Result<ClusterNode, FailureError> {
         match ZooKeeper::connect(addr, timeout, ignoreLogWatch) {
             Ok(zk) => {
                 let zk = Arc::new(Mutex::new(zk));
                 let active_path = format!("/otter/canal/destinations/{}/running", destinations.clone());
-                let mut cluster = Cluster {
+                let cluster = ClusterNode {
                     destinations: destinations.clone(),
                     zk: zk.clone(),
                 };
-                let node = Cluster::get_active_canal_config_watch(zk.clone(), &destinations, cluster.clone()).await?;
+                let node = ClusterNode::get_active_canal_config_watch(zk.clone(), &destinations, cluster.clone()).await?;
                 Ok(cluster)
             }
             Err(e) => {
@@ -54,7 +136,7 @@ impl Cluster {
         }
     }
 
-    fn get_active_canal_config_by_zk(&self) -> Result<RunningNode, FailureError> {
+    pub(crate) fn get_active_canal_config(&self) -> Result<RunningNode, FailureError> {
         let zk = self.zk.lock().unwrap();
         let cluster_path = format!("/otter/canal/destinations/{}/cluster", self.destinations);
         let active_path = format!("/otter/canal/destinations/{}/running", self.destinations);
@@ -66,7 +148,7 @@ impl Cluster {
         }).map_err(|err| err.into())
     }
 
-    async fn get_active_canal_config_watch<W: Watcher + 'static> (zk: Arc<Mutex<ZooKeeper>>, destinations: &String, watcher: W) -> Result<RunningNode, FailureError> {
+    async fn get_active_canal_config_watch<W: Watcher + 'static>(zk: Arc<Mutex<ZooKeeper>>, destinations: &String, watcher: W) -> Result<RunningNode, FailureError> {
         let zk = zk.lock().unwrap();
         let cluster_path = format!("/otter/canal/destinations/{}/cluster", destinations);
         let active_path = format!("/otter/canal/destinations/{}/running", destinations);
@@ -90,11 +172,5 @@ mod test {
 
     #[test]
     fn it_works() {
-        // Create the runtime
-        let mut rt = Runtime::new().unwrap();
-        let mut cluster = super::Cluster::new("remote.dev.com:2181", "example".to_string(), Duration::from_secs(3));
-        rt.block_on(async move {
-            let mut cluster = super::Cluster::new("remote.dev.com:2181", "example".to_string(), Duration::from_secs(3));
-        });
     }
 }

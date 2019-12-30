@@ -31,27 +31,30 @@ const version: i32 = 1;
 
 pub struct Client {
     addr: SocketAddr,
-    db_conf: DbConfig,
+    conf: Config,
     framed: Option<Framed<TcpStream, LengthDelimitedCodec>>,
     connected: bool,
-    client_id: String,
-    destination: String,
 }
 
-pub struct DbConfig {
+#[derive(Clone)]
+pub struct Config {
     user_name: String,
     password: String,
+    client_id: String,
+    destinations: String,
     net_read_timeout_present: ClientAuth_oneof_net_read_timeout_present,
     net_write_timeout_present: ClientAuth_oneof_net_write_timeout_present,
 }
 
-impl DbConfig {
-    pub fn new(user_name: String, password: String,
+impl Config {
+    pub fn new(user_name: String, password: String, client_id: String, destinations: String,
                net_read_timeout_present: ClientAuth_oneof_net_read_timeout_present,
                net_write_timeout_present: ClientAuth_oneof_net_write_timeout_present) -> Self {
-        DbConfig {
+        Config {
             user_name,
             password,
+            client_id,
+            destinations,
             net_read_timeout_present,
             net_write_timeout_present,
         }
@@ -59,18 +62,16 @@ impl DbConfig {
 }
 
 impl Client {
-    pub fn new(addr: SocketAddr, conf: DbConfig) -> Client {
+    pub fn new(addr: SocketAddr, conf: Config) -> Client {
         Client {
             addr,
-            db_conf: conf,
+            conf: conf,
             framed: None,
             connected: false,
-            client_id: "127".to_string(),
-            destination: "example".to_string(),
         }
     }
 
-    pub async fn connect(&mut self) -> Result<(), Box<dyn Error>> {
+    pub async fn connect(&mut self) -> Result<(), FailureError> {
         let stream = TcpStream::connect(&self.addr).await?;
         let mut builder = codec::length_delimited::Builder::new().big_endian().length_field_length(4).new_codec();
         let mut framed = Framed::new(stream, builder);
@@ -87,15 +88,15 @@ impl Client {
         if handshake.get_field_type() != PacketType::HANDSHAKE {
             bail!("expect handshake but found other type");
         }
-        protobuf::parse_from_bytes::<Handshake>(handshake.get_body()).map(|_| ()).map_err(|err|err.into())
+        protobuf::parse_from_bytes::<Handshake>(handshake.get_body()).map(|_| ()).map_err(|err| err.into())
     }
 
-    async fn handle_auth(&mut self) -> Result<(), Box<dyn Error>> {
+    async fn handle_auth(&mut self) -> Result<(), FailureError> {
         let mut auth = ClientAuth::new();
-        auth.username = self.db_conf.user_name.clone();
-        auth.password = self.db_conf.password.clone().into_bytes();
-        auth.net_read_timeout_present = Some(self.db_conf.net_read_timeout_present.clone());
-        auth.net_write_timeout_present = Some(self.db_conf.net_write_timeout_present.clone());
+        auth.username = self.conf.user_name.clone();
+        auth.password = self.conf.password.clone().into_bytes();
+        auth.net_read_timeout_present = Some(self.conf.net_read_timeout_present.clone());
+        auth.net_write_timeout_present = Some(self.conf.net_write_timeout_present.clone());
         self.write_message(PacketType::CLIENTAUTHENTICATION, auth).await?;
         let packet = self.read_packet().await?;
         assert_eq!(packet.get_field_type(), PacketType::ACK);
@@ -108,8 +109,8 @@ impl Client {
     pub async fn get_without_ack(&mut self, batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError> {
         assert!(self.connected);
         let mut get_proto = Get::new();
-        get_proto.set_client_id(self.client_id.clone());
-        get_proto.set_destination(self.destination.clone());
+        get_proto.set_client_id(self.conf.client_id.clone());
+        get_proto.set_destination(self.conf.destinations.clone());
         get_proto.set_fetch_size(batch_size);
         let _timeout = timeout.or_else(|| Some(-1));
         get_proto.set_timeout(_timeout.unwrap());
@@ -128,8 +129,8 @@ impl Client {
     pub async fn subscribe(&mut self, filter: String) -> Result<(), FailureError> {
         assert!(self.connected);
         let mut sub = Sub::new();
-        sub.set_client_id(self.client_id.clone());
-        sub.set_destination(self.destination.clone());
+        sub.set_client_id(self.conf.client_id.clone());
+        sub.set_destination(self.conf.destinations.clone());
         sub.set_filter(filter);
         self.write_message(PacketType::SUBSCRIPTION, sub).await;
         let packet = self.read_packet().await?;
@@ -144,8 +145,8 @@ impl Client {
     pub async fn unsubscribe(&mut self, filter: String) -> Result<(), FailureError> {
         assert!(self.connected);
         let mut unsub = Unsub::new();
-        unsub.set_client_id(self.client_id.clone());
-        unsub.set_destination(self.destination.clone());
+        unsub.set_client_id(self.conf.client_id.clone());
+        unsub.set_destination(self.conf.destinations.clone());
         unsub.set_filter(filter);
         self.write_message(PacketType::UNSUBSCRIPTION, unsub).await;
         let packet = self.read_packet().await?;
@@ -164,8 +165,8 @@ impl Client {
     pub async fn ack(&mut self, batch_id: i64) -> Result<(), FailureError> {
         assert!(self.connected);
         let mut ack = ClientAck::new();
-        ack.set_client_id(self.client_id.clone());
-        ack.set_destination(self.destination.clone());
+        ack.set_client_id(self.conf.client_id.clone());
+        ack.set_destination(self.conf.destinations.clone());
         ack.set_batch_id(batch_id);
         self.write_message(PacketType::CLIENTACK, ack).await
     }
@@ -173,8 +174,8 @@ impl Client {
     pub async fn roll_back(&mut self, batch_id: i64) -> Result<(), FailureError> {
         assert!(self.connected);
         let mut roll_back = ClientRollback::new();
-        roll_back.set_client_id(self.client_id.clone());
-        roll_back.set_destination(self.destination.clone());
+        roll_back.set_client_id(self.conf.client_id.clone());
+        roll_back.set_destination(self.conf.destinations.clone());
         roll_back.set_batch_id(batch_id);
         self.write_message(PacketType::CLIENTROLLBACK, roll_back).await
     }
@@ -205,7 +206,7 @@ impl Client {
 
     async fn write_packet(&mut self, packet: Packet) -> Result<(), FailureError> {
         let framed = self.framed.as_mut().unwrap();
-        framed.send( Bytes::from(packet.write_to_bytes().unwrap())).await.map(|_| ()).map_err(|err| err.into())
+        framed.send(Bytes::from(packet.write_to_bytes().unwrap())).await.map(|_| ()).map_err(|err| err.into())
     }
 
     async fn write_message<M: Message>(&mut self, packet_type: PacketType, message: M) -> Result<(), FailureError> {
