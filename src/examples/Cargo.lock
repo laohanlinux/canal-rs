@@ -150,6 +150,7 @@ dependencies = [
  "protobuf",
  "tokio",
  "tokio-util",
+ "zookeeper",
 ]
 
 [[package]]

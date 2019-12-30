@@ -22,10 +22,8 @@ pub struct Cluster {
 }
 
 impl Cluster {
-    pub async fn new(config: Config, destinations: String, zk_addr: String, zk_timeout: Duration) -> Result<Cluster, FailureError> {
-        let node = ClusterNode::new(zk_addr.as_str(), destinations.clone(), zk_timeout).await?;
-        let running_node: RunningNode = node.get_active_canal_config()?;
-        let socket: SocketAddr = running_node.address.parse().unwrap();
+    pub async fn new(config: Config, zk_addr: String, zk_timeout: Duration) -> Result<Cluster, FailureError> {
+        let node = ClusterNode::new(zk_addr.as_str(), config.destinations.clone(), zk_timeout).await?;
         let running_node: RunningNode = node.get_active_canal_config()?;
         let mut client = crate::Client::new(running_node.address.parse().unwrap(), config.clone());
         client.connect().await?;
@@ -87,8 +85,9 @@ impl Cluster {
     async fn fix_connect(&mut self) -> Result<(), FailureError> {
         let running_node = self.node.get_active_canal_config()?;
         let socket = running_node.address.parse().unwrap();
-        self.client = crate::Client::new(socket, self.config.clone());
-        self.client.connect().await?;
+        let mut client = crate::Client::new(socket, self.config.clone());
+        client.connect().await?;
+        self.client = client;
         Ok(())
     }
 }

@@ -38,12 +38,12 @@ pub struct Client {
 
 #[derive(Clone)]
 pub struct Config {
-    user_name: String,
-    password: String,
-    client_id: String,
-    destinations: String,
-    net_read_timeout_present: ClientAuth_oneof_net_read_timeout_present,
-    net_write_timeout_present: ClientAuth_oneof_net_write_timeout_present,
+    pub user_name: String,
+    pub password: String,
+    pub client_id: String,
+    pub destinations: String,
+    pub net_read_timeout_present: ClientAuth_oneof_net_read_timeout_present,
+    pub net_write_timeout_present: ClientAuth_oneof_net_write_timeout_present,
 }
 
 impl Config {
