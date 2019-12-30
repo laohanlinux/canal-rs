@@ -7,6 +7,7 @@ pub mod cluster;
 pub mod protobuf;
 
 pub use client::{Client, Config};
+pub use cluster::Cluster;
 
 #[cfg(test)]
 mod tests {
