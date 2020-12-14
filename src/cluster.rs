@@ -28,9 +28,9 @@ impl Cluster {
         let mut client = crate::Client::new(running_node.address.parse().unwrap(), config.clone());
         client.connect().await?;
         Ok(Cluster {
-            node: node,
+            node,
             client,
-            config: config,
+            config,
         })
     }
 
@@ -106,19 +106,21 @@ pub struct RunningNode {
     address: String,
 }
 
-struct ignoreLogWatch;
+struct IgnoreLogWatch;
 
-impl Watcher for ignoreLogWatch {
-    fn handle(&self, e: WatchedEvent) {}
+impl Watcher for IgnoreLogWatch {
+    fn handle(&self, _: WatchedEvent) {}
 }
 
 impl Watcher for ClusterNode {
-    fn handle(&self, e: WatchedEvent) {}
+    fn handle(&self, e: WatchedEvent) {
+        debug!("receive a event: {:?}", e);
+    }
 }
 
 impl ClusterNode {
     pub async fn new(addr: &str, destinations: String, timeout: Duration) -> Result<ClusterNode, FailureError> {
-        match ZooKeeper::connect(addr, timeout, ignoreLogWatch) {
+        match ZooKeeper::connect(addr, timeout, IgnoreLogWatch) {
             Ok(zk) => {
                 let zk = Arc::new(Mutex::new(zk));
                 let active_path = format!("/otter/canal/destinations/{}/running", destinations.clone());
@@ -126,7 +128,7 @@ impl ClusterNode {
                     destinations: destinations.clone(),
                     zk: zk.clone(),
                 };
-                let node = ClusterNode::get_active_canal_config_watch(zk.clone(), &destinations, cluster.clone()).await?;
+                ClusterNode::get_active_canal_config_watch(zk.clone(), &destinations, cluster.clone()).await?;
                 Ok(cluster)
             }
             Err(e) => {
@@ -170,6 +172,5 @@ mod test {
     use tokio::runtime::Runtime;
 
     #[test]
-    fn it_works() {
-    }
+    fn it_works() {}
 }

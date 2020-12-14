@@ -27,7 +27,7 @@ use crate::protobuf::CanalProtocol::{Packet,
                                      ClientAuth_oneof_net_write_timeout_present};
 use protobuf::{Message, parse_from_bytes};
 
-const version: i32 = 1;
+const VERSION: i32 = 1;
 
 pub struct Client {
     addr: SocketAddr,
@@ -73,16 +73,15 @@ impl Client {
 
     pub async fn connect(&mut self) -> Result<(), FailureError> {
         let stream = TcpStream::connect(&self.addr).await?;
-        let mut builder = codec::length_delimited::Builder::new().big_endian().length_field_length(4).new_codec();
-        let mut framed = Framed::new(stream, builder);
-        self.framed = Some(framed);
+        let builder = codec::length_delimited::Builder::new().big_endian().length_field_length(4).new_codec();
+        self.framed = Some(Framed::new(stream, builder));
         let packet: Packet = self.read_packet().await?;
         self.handle_handshake(&packet)?;
         self.handle_auth().await
     }
 
     pub fn handle_handshake(&self, handshake: &Packet) -> Result<(), FailureError> {
-        if handshake.get_version() != version {
+        if handshake.get_version() != VERSION {
             bail!("version is not matched:{:?} {:?}", handshake.version_present, handshake.get_version());
         }
         if handshake.get_field_type() != PacketType::HANDSHAKE {
@@ -132,7 +131,7 @@ impl Client {
         sub.set_client_id(self.conf.client_id.clone());
         sub.set_destination(self.conf.destinations.clone());
         sub.set_filter(filter);
-        self.write_message(PacketType::SUBSCRIPTION, sub).await;
+        self.write_message(PacketType::SUBSCRIPTION, sub).await?;
         let packet = self.read_packet().await?;
         assert_eq!(packet.get_field_type(), PacketType::ACK);
         let ack: Ack = protobuf::parse_from_bytes(packet.get_body()).unwrap();
@@ -148,7 +147,7 @@ impl Client {
         unsub.set_client_id(self.conf.client_id.clone());
         unsub.set_destination(self.conf.destinations.clone());
         unsub.set_filter(filter);
-        self.write_message(PacketType::UNSUBSCRIPTION, unsub).await;
+        self.write_message(PacketType::UNSUBSCRIPTION, unsub).await?;
         let packet = self.read_packet().await?;
         assert_eq!(packet.get_field_type(), PacketType::ACK);
         match protobuf::parse_from_bytes::<Ack>(packet.get_body()) {
