@@ -14,7 +14,6 @@ use std::net::SocketAddr;
 use crate::{Config, Client};
 use crate::protobuf::CanalProtocol::Messages;
 
-
 pub struct Cluster {
     config: Config,
     node: ClusterNode,
@@ -167,7 +166,6 @@ impl ClusterNode {
 #[cfg(test)]
 mod test {
     use std::time::Duration;
-    use tokio::prelude::*;
     use tokio::task;
     use tokio::runtime::Runtime;
 
