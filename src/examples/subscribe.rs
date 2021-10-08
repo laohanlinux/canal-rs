@@ -8,9 +8,8 @@ use canal_rs::protobuf::CanalProtocol::ClientAuth_oneof_net_read_timeout_present
 use canal_rs::protobuf::CanalProtocol::ClientAuth_oneof_net_write_timeout_present;
 use protobuf::parse_from_bytes;
 
-use tokio::prelude::*;
 use tokio::task;
-use tokio::time::{self, delay_for};
+use tokio::time::{self, sleep};
 use std::time::Duration;
 
 #[tokio::main]
@@ -26,7 +25,7 @@ async fn main() -> Result<(), String> {
         while let message = client.get(100, Some(10), Some(10)).await.unwrap() {
             if message.batch_id == -1 {
                 debug!("Empty data");
-                delay_for(Duration::from_secs(3)).await;
+                sleep(Duration::from_secs(3)).await;
                 continue;
             }
             debug!("batch_id: {:?}", message.batch_id);
@@ -39,7 +38,7 @@ async fn main() -> Result<(), String> {
                     _ => {}
                 }
             }
-            delay_for(Duration::from_secs(1)).await;
+            sleep(Duration::from_secs(1)).await;
         }
     });
 

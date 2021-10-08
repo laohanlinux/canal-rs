@@ -3,7 +3,6 @@ use log::{info, trace, warn};
 use std::error::Error;
 use std::time::Duration;
 
-use tokio::prelude::*;
 use tokio::net::TcpStream;
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use tokio_util::codec::{self, LengthDelimitedCodec, Framed};
@@ -65,7 +64,7 @@ impl Client {
     pub fn new(addr: SocketAddr, conf: Config) -> Client {
         Client {
             addr,
-            conf: conf,
+            conf,
             framed: None,
             connected: false,
         }
@@ -99,7 +98,7 @@ impl Client {
         self.write_message(PacketType::CLIENTAUTHENTICATION, auth).await?;
         let packet = self.read_packet().await?;
         assert_eq!(packet.get_field_type(), PacketType::ACK);
-        let ack: Ack = protobuf::parse_from_bytes(packet.get_body()).unwrap();
+        let ack = Ack::parse_from_bytes(packet.get_body())?;
         assert_eq!(ack.get_error_code(), 0);
         self.connected = true;
         Ok(())
@@ -134,7 +133,7 @@ impl Client {
         self.write_message(PacketType::SUBSCRIPTION, sub).await?;
         let packet = self.read_packet().await?;
         assert_eq!(packet.get_field_type(), PacketType::ACK);
-        let ack: Ack = protobuf::parse_from_bytes(packet.get_body()).unwrap();
+        let ack = Ack::parse_from_bytes(packet.get_body())?;
         if ack.get_error_code() != 0 {
             bail!("code: {:?}", ack.get_error_code());
         }
@@ -150,7 +149,7 @@ impl Client {
         self.write_message(PacketType::UNSUBSCRIPTION, unsub).await?;
         let packet = self.read_packet().await?;
         assert_eq!(packet.get_field_type(), PacketType::ACK);
-        match protobuf::parse_from_bytes::<Ack>(packet.get_body()) {
+        match Ack::parse_from_bytes(packet.get_body()) {
             Ok(ack) => {
                 if ack.get_error_code() > 0 {
                     bail!("code: {:?}", ack.get_error_code());
@@ -191,7 +190,7 @@ impl Client {
         let framed = self.framed.as_mut().unwrap();
         match framed.next().await {
             Some(Ok(buf)) => {
-                let packet: Packet = protobuf::parse_from_bytes(&buf).unwrap();
+                let packet: Packet = Packet::parse_from_bytes(&buf)?;
                 Ok(packet)
             }
             Some(Err(e)) => bail!("{:?}", e),
@@ -200,18 +199,19 @@ impl Client {
     }
 
     async fn read_message<M: Message>(&mut self) -> Result<M, FailureError> {
-        self.read_packet().await.map(|packet| protobuf::parse_from_bytes(packet.get_body()).unwrap()).map_err(|err| err.into())
+        let packet = self.read_packet().await?;
+        M::parse_from_bytes(&*packet.body).map_err(|err| err.into())
     }
 
     async fn write_packet(&mut self, packet: Packet) -> Result<(), FailureError> {
         let framed = self.framed.as_mut().unwrap();
-        framed.send(Bytes::from(packet.write_to_bytes().unwrap())).await.map(|_| ()).map_err(|err| err.into())
+        framed.send(Bytes::from(packet.write_to_bytes()?)).await.map(|_| ()).map_err(|err| err.into())
     }
 
     async fn write_message<M: Message>(&mut self, packet_type: PacketType, message: M) -> Result<(), FailureError> {
         let mut packet = Packet::new();
         packet.set_field_type(packet_type);
-        packet.set_body(message.write_to_bytes().unwrap());
+        packet.set_body(message.write_to_bytes()?);
         self.write_packet(packet).await
     }
 }

@@ -10,9 +10,8 @@ use canal_rs::protobuf::CanalProtocol::ClientAuth_oneof_net_write_timeout_presen
 use canal_rs::protobuf::CanalProtocol::Messages;
 use protobuf::parse_from_bytes;
 
-use tokio::prelude::*;
 use tokio::task;
-use tokio::time::{self, delay_for};
+use tokio::time::{self, sleep};
 use std::time::Duration;
 use std::io;
 
@@ -39,16 +38,16 @@ async fn main() -> Result<(), FailureError> {
             match message {
                 Ok(message) => {
                     output(message);
-                    delay_for(Duration::from_secs(3));
+                    sleep(Duration::from_secs(3));
                 }
                 Err(err) => {
                     if err.downcast_ref::<ZkError>().is_some() {
                         debug!("not found available node");
-                        delay_for(Duration::from_secs(3));
+                        sleep(Duration::from_secs(3));
                         continue;
                     } else if err.downcast_ref::<io::Error>().is_some() {
                         debug!("not found available node");
-                        delay_for(Duration::from_secs(3));
+                        sleep(Duration::from_secs(3));
                         continue;
                     }
                     break;
