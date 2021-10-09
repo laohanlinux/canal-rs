@@ -34,47 +34,32 @@ impl Cluster {
     }
 
     pub async fn get_without_ack(&mut self, batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError> {
-        let ret = self.client.get_without_ack(batch_size, timeout, uints).await;
-        if ret.is_ok() {
-            return ret;
-        }
+        let ret = self.client.get_without_ack(batch_size, timeout, uints).await?;
         self.fix_connect().await?;
-        ret
+        Ok(ret)
     }
 
     pub async fn get(&mut self, batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError> {
-        let ret = self.client.get(batch_size, timeout, uints).await;
-        if ret.is_ok() {
-            return ret;
-        }
+        let ret = self.client.get(batch_size, timeout, uints).await?;
         self.fix_connect().await?;
-        ret
+        Ok(ret)
     }
     pub async fn subscribe(&mut self, filter: String) -> Result<(), FailureError> {
-        let ret = self.client.subscribe(filter).await;
-        if ret.is_ok() {
-            return ret;
-        }
+        let ret = self.client.subscribe(filter).await?;
         self.fix_connect().await?;
-        ret
+        Ok(ret)
     }
 
     pub async fn unsubscribe(&mut self, filter: String) -> Result<(), FailureError> {
-        let ret = self.client.unsubscribe(filter).await;
-        if ret.is_ok() {
-            return ret;
-        }
+        let ret = self.client.unsubscribe(filter).await?;
         self.fix_connect().await?;
-        ret
+        Ok(ret)
     }
 
     pub async fn ack(&mut self, batch_id: i64) -> Result<(), FailureError> {
-        let ret = self.client.ack(batch_id).await;
-        if ret.is_ok() {
-            return ret;
-        }
+        let ret = self.client.ack(batch_id).await?;
         self.fix_connect().await?;
-        ret
+        Ok(ret)
     }
 
     pub async fn disconnect(&mut self) -> Result<(), FailureError> {
@@ -83,7 +68,7 @@ impl Cluster {
 
     async fn fix_connect(&mut self) -> Result<(), FailureError> {
         let running_node = self.node.get_active_canal_config()?;
-        let socket = running_node.address.parse().unwrap();
+        let socket = running_node.address.parse()?;
         let mut client = crate::Client::new(socket, self.config.clone());
         client.connect().await?;
         self.client = client;
@@ -140,35 +125,17 @@ impl ClusterNode {
         let zk = self.zk.lock().unwrap();
         let cluster_path = format!("/otter/canal/destinations/{}/cluster", self.destinations);
         let active_path = format!("/otter/canal/destinations/{}/running", self.destinations);
-        zk.get_children(cluster_path.as_str(), false).map(|nodes| {
-            nodes.iter().for_each(|node| { debug!("canal node: {:?}", node) });
-        }).map_err::<FailureError, _>(|err| err.into())?;
-        zk.get_data(active_path.as_str(), false).map(|(value, _)| {
-            serde_json::from_slice(&value).unwrap()
-        }).map_err(|err| err.into())
+        zk.get_children(cluster_path.as_str(), false)?.iter().for_each(|node| { debug!("canal node: {:?}", node) });
+        let (data, _) = zk.get_data(active_path.as_str(), false)?;
+        serde_json::from_slice(&data).map_err(|err| err.into())
     }
 
     async fn get_active_canal_config_watch<W: Watcher + 'static>(zk: Arc<Mutex<ZooKeeper>>, destinations: &String, watcher: W) -> Result<RunningNode, FailureError> {
         let zk = zk.lock().unwrap();
         let cluster_path = format!("/otter/canal/destinations/{}/cluster", destinations);
         let active_path = format!("/otter/canal/destinations/{}/running", destinations);
-        zk.get_children(cluster_path.as_str(), false).map(|nodes| {
-            nodes.iter().for_each(|node| { debug!("canal node: {:?}", node); });
-        }).map_err::<FailureError, _>(|err| {
-            err.into()
-        })?;
-        zk.get_data_w(active_path.as_str(), watcher).map(|(value, _)| {
-            serde_json::from_slice(&value).unwrap()
-        }).map_err(|err| err.into())
+        zk.get_children(cluster_path.as_str(), false)?.iter().for_each(|node| { debug!("canal node: {:?}", node); });
+        let (data, _) = zk.get_data_w(active_path.as_str(), watcher)?;
+        serde_json::from_slice(&data).map_err(|err| err.into())
     }
-}
-
-#[cfg(test)]
-mod test {
-    use std::time::Duration;
-    use tokio::task;
-    use tokio::runtime::Runtime;
-
-    #[test]
-    fn it_works() {}
 }

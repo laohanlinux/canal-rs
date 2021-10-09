@@ -86,7 +86,7 @@ impl Client {
         if handshake.get_field_type() != PacketType::HANDSHAKE {
             bail!("expect handshake but found other type");
         }
-        protobuf::parse_from_bytes::<Handshake>(handshake.get_body()).map(|_| ()).map_err(|err| err.into())
+        Handshake::parse_from_bytes(handshake.get_body()).map(|_| ()).map_err(|err| err.into())
     }
 
     async fn handle_auth(&mut self) -> Result<(), FailureError> {
@@ -106,13 +106,14 @@ impl Client {
 
     pub async fn get_without_ack(&mut self, batch_size: i32, timeout: Option<i64>, uints: Option<i32>) -> Result<Messages, FailureError> {
         assert!(self.connected);
+        let timeout = timeout.or_else(|| Some(-1)).unwrap();
+        let uints = uints.or_else(|| Some(-1)).unwrap();
         let mut get_proto = Get::new();
         get_proto.set_client_id(self.conf.client_id.clone());
         get_proto.set_destination(self.conf.destinations.clone());
         get_proto.set_fetch_size(batch_size);
-        let _timeout = timeout.or_else(|| Some(-1));
-        get_proto.set_timeout(_timeout.unwrap());
-        get_proto.set_unit(uints.or_else(|| Some(-1)).unwrap());
+        get_proto.set_timeout(timeout);
+        get_proto.set_unit(uints);
         get_proto.set_auto_ack(false);
         self.write_message(PacketType::GET, get_proto).await?;
         self.read_message().await
